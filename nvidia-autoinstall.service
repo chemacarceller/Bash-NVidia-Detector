@@ -8,7 +8,7 @@ Before=display-manager.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/nvidia-autoinstall.sh
+ExecStart=/usr/local/bin/detector-nvidia.sh
 RemainAfterExit=yes
 StandardOutput=journal+console
 StandardError=journal+console
