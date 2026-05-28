@@ -1,0 +1,17 @@
+[Unit]
+Description=Automatic Installation of Nvidia Drivers at Boot
+# This runs after NetworkManager attempts to start the network
+After=network-online.target NetworkManager.service plymouth-start.service
+Wants=network-online.target
+# It stops if the graphical login manager has already started
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nvidia-autoinstall.sh
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
