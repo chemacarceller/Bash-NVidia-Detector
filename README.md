@@ -42,9 +42,9 @@ El archivo del servicio de Systemd /etc/systemd/system/nvidia-autoinstall.servic
 sudo chmod 644 /etc/systemd/system/nvidia-autoinstall.service    <br/>
 sudo chown root:root /etc/systemd/system/nvidia-autoinstall.service
 
-No olvides eliminar los archivos /var/log/nvidia_autoinstall.log , /var/local/nvidia_success.flag en el caso de hacer una imagen, el primero simplemente para vaciar contenido de ejecuciones anteriores, mientras que el segundo es el flag de exito de la ejecución, hay que eliminarlo, sino el script nunca se ejecutaría al restaurar la imagen en otro pc
-
 Actualiza el demonio de Systemd y activa el servicio para que se ejecute en el próximo reinicio: 
 
 sudo systemctl daemon-reload   <br/>
 sudo systemctl enable nvidia-autoinstall.service
+
+No olvides eliminar los archivos /var/log/nvidia_autoinstall.log , /var/local/nvidia_success.flag en el caso de hacer una imagen, el primero simplemente para vaciar contenido de ejecuciones anteriores, mientras que el segundo es el flag de exito de la ejecución, hay que eliminarlo, sino el script nunca se ejecutaría al restaurar la imagen en otro pc
