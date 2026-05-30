@@ -22,6 +22,8 @@ Update the Systemd daemon and enable the service to run on the next reboot:
 sudo systemctl daemon-reload    <br/>
 sudo systemctl enable nvidia-autoinstall.service
 
+Don't forget to delete the files /var/log/nvidia_autoinstall.log and /var/local/nvidia_success.flag when creating an image. The first one simply clears the contents of previous executions, while the second is the success flag for the execution; it must be deleted, otherwise the script will never run when restoring the image on another PC.
+
 ==========================================================================================
 
 Esta utilidad escrita en shell bash permite detectar si el PC tiene instalada una tarjeta NVidia, en cuyo caso se instalarían los drivers más actuales
@@ -39,6 +41,8 @@ El archivo del servicio de Systemd /etc/systemd/system/nvidia-autoinstall.servic
 
 sudo chmod 644 /etc/systemd/system/nvidia-autoinstall.service    <br/>
 sudo chown root:root /etc/systemd/system/nvidia-autoinstall.service
+
+No olvides eliminar los archivos /var/log/nvidia_autoinstall.log , /var/local/nvidia_success.flag en el caso de hacer una imagen, el primero simplemente para vaciar contenido de ejecuciones anteriores, mientras que el segundo es el flag de exito de la ejecución, hay que eliminarlo, sino el script nunca se ejecutaría al restaurar la imagen en otro pc
 
 Actualiza el demonio de Systemd y activa el servicio para que se ejecute en el próximo reinicio: 
 
