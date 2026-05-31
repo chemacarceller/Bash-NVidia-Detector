@@ -1,16 +1,17 @@
 #!/bin/bash
 
+# Files to store logs and to indicate that the operating system is ready and should not perform the process, or that the operating system has problems and needs to be fixed.
 LOG_FILE="/var/log/nvidia_autoinstall.log"
 ATTEMPT_FILE="/var/local/nvidia_attempted.flag"
 SUCCESS_FILE="/var/local/nvidia_success.flag"
 
-
+# Function to save logs
 doLog() {
     mkdir -p "$(dirname "$LOG_FILE")"
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
 }
 
-
+# Function to load NVidia drivers
 run_nvidia_installation() {
 
     main_status=0
@@ -31,11 +32,11 @@ run_nvidia_installation() {
     apt-get install -y -qq linux-headers-$(uname -r) build-essential dkms 2>/dev/null
 
     # 3. Unattended driver installation
-    ubuntu-drivers install 2>&1 | while read -r linea; do
-        echo "$linea" >> "$LOG_FILE"
-        texto=$(echo "$linea" | grep -E "Unpacking|Preparing|Selecting|Setting|Created|Processing|Updating")
-        if [ "$texto" != ""  ]; then
-           plymouth message --text="$texto"
+    ubuntu-drivers install 2>&1 | while read -r aLine; do
+        echo "$aLine" >> "$LOG_FILE"
+        aMessage=$(echo "$aLine" | grep -E "Unpacking|Preparing|Selecting|Setting|Created|Processing|Updating")
+        if [ "$aMessage" != ""  ]; then
+           plymouth message --text="$aMessage"
            sleep 0.5
         fi
     done
@@ -46,6 +47,7 @@ run_nvidia_installation() {
     
         doLog "Installation completed. Enabling drivers in Kernel..."
         plymouth message --text="Installation completed. Enabling drivers in Kernel..." 2>/dev/null
+        sleep 1
         
         # Prevent Nouveau from loading on next boot
         echo -e "blacklist nouveau\noptions nouveau modeset=0" > /etc/modprobe.d/blacklist-nouveau.conf
@@ -59,6 +61,7 @@ run_nvidia_installation() {
             plymouth message --text="Removing legacy Nouveau driver..." 2>/dev/null 
             echo 0 > /sys/class/vtconsole/vtcon1/bind 2>/dev/null || true
             modprobe -r nouveau 2>/dev/null || doLog "Warning: Nouveau in use. Changes apply after reboot."
+            sleep 1
         fi
         
         # Force load NVIDIA modules into live memory
@@ -67,15 +70,18 @@ run_nvidia_installation() {
         modprobe nvidia 2>>"$LOG_FILE"
         modprobe nvidia-modeset 2>>"$LOG_FILE"
         modprobe nvidia-drm modeset=1 2>>"$LOG_FILE"
+        sleep 1
         
         # Update initramfs to persist modules on next boot
         doLog "Updating initramfs..."
         plymouth message --text="Updating initramfs..." 2>/dev/null
         update-initramfs -u -k all >/dev/null 2>&1
+        sleep 1
 
     else
         plymouth message --text="ERROR: Automatic installation via ubuntu-drivers failed (Exit code: $main_status)" 2>/dev/null
         doLog "ERROR: Automatic installation via ubuntu-drivers failed (Exit code: $main_status)"
+        sleep 1
     fi
 
     return "$main_status"
@@ -84,7 +90,7 @@ run_nvidia_installation() {
 
 
 
-
+# Start the script...
 
 
 # 1. VALIDATE ROOT PRIVILEGES
@@ -123,7 +129,7 @@ if lspci | grep -qi nvidia; then
         # 6. WAIT FOR THE NETWORK TO BE AVAILABLE
         doLog "Waiting for network stability..."
         plymouth message --text="Waiting for network stability..." 2>/dev/null
-        # 30 seconds waiting
+        # 30 seconds waiting for internet connection
         for i in {1..15}; do
             if [ "$(nmcli networking connectivity)" = "full" ]; then
                 break
@@ -143,6 +149,7 @@ if lspci | grep -qi nvidia; then
             block_attempts=0
             max_block_attempts=24
 
+            # wait safely for the package installation system (APT) to be released in Linux.
             while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
                 if [ $block_attempts -ge $max_block_attempts ]; then
                     doLog "ERROR: The package manager is still blocked after 2 minutes. Aborting installation."
@@ -187,6 +194,7 @@ if lspci | grep -qi nvidia; then
 
             plymouth message --text="Looking for the best certified controller..." 2>/dev/null
             doLog "Repositories updated. Preparing installer..."
+            sleep 1
 
 
             # 11. DRIVERS INSTALL
@@ -199,13 +207,18 @@ if lspci | grep -qi nvidia; then
 
                 plymouth message --text="Activating Nvidia graphics profile..." 2>/dev/null
                 doLog "Installation successful. Forcing Nvidia profile via prime-select..."
+                sleep 1
                 
                 # Forces the system to use the Nvidia GPU permanently
                 if command -v prime-select &> /dev/null; then
                     prime-select nvidia >> "$LOG_FILE" 2>&1
                     doLog "prime-select: Nvidia profile enabled successfully."
+                    plymouth message --text="prime-select: Nvidia profile enabled successfully." 2>/dev/null
+                    sleep 1
                 else
                     doLog "WARNING: prime-select command not found. Skipping profile activation."
+                    plymouth message --text="WARNING: prime-select command not found. Skipping profile activation." 2>/dev/null
+                    sleep 1
                 fi
 
                 plymouth message --text="Installation completed successfully. Restarting..." 2>/dev/null
@@ -220,7 +233,7 @@ if lspci | grep -qi nvidia; then
                    rm -f "$ATTEMPT_FILE"
                 fi
 
-                sleep 3
+                sleep 2
 
                 reboot
             else
