@@ -12,77 +12,80 @@ doLog() {
 
 
 run_nvidia_installation() {
-
-    doLog "Starting NVIDIA automatic installation and enablement..."
-    plymouth message --text="Installing NVIDIA Driver..." 2>/dev/null
-
-    # 1. Configuration for full automation without blocking
-    # Don't ask visual questions, choose the default option for everything
+    # Force system language to English for predictable string parsing (Setting up, Unpacking...)
+    export LANG=en_US.UTF-8
+    export LC_ALL=C.UTF-8
     export DEBIAN_FRONTEND=noninteractive
 
-    # When the installer reaches the license, it sees that it has already been accepted and does not freeze the script.
+    doLog "Starting automatic NVIDIA installation and activation..."
+    plymouth message --text="Installing NVIDIA Driver..." 2>/dev/null
+
+    # 1. Configuration for full automation without prompts
     echo "nvidia-support nvidia-support/accepted-eula boolean true" | debconf-set-selections
 
-    # 2. Ensure critical dependencies are met for the driver to compile and function
+    # 2. Secure critical build dependencies (without conflicting generic driver wildcards)
     apt-get update -y -qq
+    apt-get install -y -qq linux-headers-$(uname -r) build-essential dkms 2>/dev/null
 
-    # Removed the xserver wildcard to avoid syntax errors in APT
-    apt-get install -y -qq linux-headers-$(uname -r) build-essential dkms >> "$LOG_FILE" 2>&1
+    # 3. Unattended driver installation
+    ubuntu-drivers install > /dev/null 2>&1 | tee -a "$LOG_FILE"
 
-    # 3. Unattended installation of the recommended driver
-    # We run in the background processing the output pipeline
-    while read -r line; do
-        local package
-        package=$(echo "$line" | awk '{print $2}' | cut -d':' -f1 | tr -d '()[]:,')
+    # Fixed PIPESTATUS array mapping
+    local pipe_status=("${PIPESTATUS[@]}")
+    local main_status=${pipe_status[0]}
+
+    # 4. Immediate kernel module loading
+    # Real verification: Do NVIDIA binaries exist now?
+    if [ -f "/usr/bin/nvidia-smi" ]; then
+    
+    	main_status=0
+    
+        doLog "Installation completed. Enabling drivers in Kernel..."
+        plymouth message --text="Installation completed. Enabling drivers in Kernel..." 2>/dev/null
         
-        if [ -n "$package" ]; then
-            echo "Procesando: $package"
-            plymouth message --text="Installing : $package" 2>/dev/null
-            echo "$(date '+%Y-%m-%d %H:%M:%S') - APT: $package" >> "$LOG_FILE"
-        fi
-    # Using 2>&1 redirects errors so they are also processed or logged
-    # Scan your computer's buses, detect the exact model of your NVIDIA card, and search the repositories for the most stable and certified proprietary driver for it.
-    done < <(LC_ALL=C stdbuf -oL ubuntu-drivers autoinstall 2>&1 | tee -a "$LOG_FILE" | grep --line-buffered -E '^Setting up|^Unpacking|^Error')
-
-    # CORRECTION: Exact screenshot of the exit code for 'ubuntu-drivers' (the first command in the pipeline)
-    local main_status=${PIPESTATUS[0]}
-
-    # 4. IMMEDIATE ACTIVATION (The key step)
-    if [ "$main_status" -eq 0 ]; then
-
-        doLog "Installation complete. Enabling drivers in the kernel..."
+        # Prevent Nouveau from loading on next boot
+        echo -e "blacklist nouveau\noptions nouveau modeset=0" > /etc/modprobe.d/blacklist-nouveau.conf
         
-        # Generar el mapa de dependencias de módulos de Linux
-        depmod -a >> "$LOG_FILE" 2>&1
+        # Generate Linux module dependency maps
+        depmod -a
         
-        # Disable the generic 'nouveau' driver to free up the GPU (if it's loaded)
+        # Attempt to hot-unload Nouveau if active
         if lsmod | grep -q "nouveau"; then
-            doLog "Removing the old Nouveau driver..."
-            modprobe -r nouveau 2>/dev/null || echo "blacklist nouveau" > /etc/modprobe.d/blacklist-nouveau.conf
+            doLog "Removing legacy Nouveau driver..."
+            plymouth message --text="Removing legacy Nouveau driver..." 2>/dev/null
+            echo 0 > /sys/class/vtconsole/vtcon1/bind 2>/dev/null || true
+            modprobe -r nouveau 2>/dev/null || doLog "Warning: Nouveau in use. Changes apply after reboot."
         fi
         
-        # Force load the new NVIDIA modules into memory
+        # Force load NVIDIA modules into live memory
         doLog "Loading official NVIDIA modules..."
+        plymouth message --text="Loading official NVIDIA modules..." 2>/dev/null
         modprobe nvidia 2>>"$LOG_FILE"
         modprobe nvidia-modeset 2>>"$LOG_FILE"
-        modprobe nvidia-drm 2>>"$LOG_FILE"
+        modprobe nvidia-drm modeset=1 2>>"$LOG_FILE"
         
-        # Update initramfs to ensure it persists on the next boot
-        update-initramfs -u -k all >> "$LOG_FILE" 2>&1
+        # Update initramfs to persist modules on next boot
+        doLog "Updating initramfs..."
+        plymouth message --text="Updating initramfs..." 2>/dev/null
+        update-initramfs -u -k all >/dev/null 2>&1
         
-        # Check if the card responds (Successful enablement test)
-        if command -v nvidia-smi >/dev/null 2>&1; then
-            doLog "SUCCESS! The NVIDIA drivers are installed and active."
+        # Verify hardware response
+        if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+            doLog "SUCCESS: NVIDIA drivers installed and active."
             plymouth message --text="NVIDIA enabled successfully" 2>/dev/null
         else
-            doLog "NOTICE: Driver installed but requires restart to take control of the graphical environment."
+            doLog "WARNING: Driver installed. Reboot required to take control of display server."
+            plymouth message --text="NVIDIA: Reboot required" 2>/dev/null
         fi
     else
-        doLog "ERROR: Automatic installation of ubuntu-drivers failed (Code: $main_status)"
+        main_status=${pipe_status[0]}
+        plymouth message --text="ERROR: Automatic installation via ubuntu-drivers failed (Exit code: $main_status)" 2>/dev/null
+        doLog "ERROR: Automatic installation via ubuntu-drivers failed (Exit code: $main_status)"
     fi
 
     return "$main_status"
 }
+
 
 
 
@@ -218,12 +221,8 @@ if lspci | grep -qi nvidia; then
 
                 # We remove the flag that indicates that the installation is in progress; it should only remain if the installation fails.
                 rm -f "$ATTEMPT_FILE"
-
-                # >>> THE SUBTLE SECURITY IMPROVEMENT <<<
-                # Force the hard drive to save files created and deleted before restarting
-                sync
-
                 sleep 3
+
                 reboot
             else
                 plymouth message --text="Critical error during installation. Continuing boot..." 2>/dev/null
