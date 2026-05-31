@@ -12,6 +12,9 @@ doLog() {
 
 
 run_nvidia_installation() {
+
+    main_status=0
+
     # Force system language to English for predictable string parsing (Setting up, Unpacking...)
     export LANG=en_US.UTF-8
     export LC_ALL=C.UTF-8
@@ -28,17 +31,18 @@ run_nvidia_installation() {
     apt-get install -y -qq linux-headers-$(uname -r) build-essential dkms 2>/dev/null
 
     # 3. Unattended driver installation
-    ubuntu-drivers install > /dev/null 2>&1 | tee -a "$LOG_FILE"
-
-    # Fixed PIPESTATUS array mapping
-    local pipe_status=("${PIPESTATUS[@]}")
-    local main_status=${pipe_status[0]}
+    ubuntu-drivers install 2>&1 | while read -r linea; do
+        echo "$linea" >> "$LOG_FILE"
+        texto=$(echo "$linea" | grep -E "Unpacking|Preparing|Selecting|Setting|Created|Processing|Updating")
+        if [ "$texto" != ""  ]; then
+           plymouth message --text="$texto"
+           sleep 0.5
+        fi
+    done
+    main_status=${PIPESTATUS[0]}
 
     # 4. Immediate kernel module loading
-    # Real verification: Do NVIDIA binaries exist now?
-    if [ -f "/usr/bin/nvidia-smi" ]; then
-    
-    	main_status=0
+    if [ $main_status -eq 0 ]; then
     
         doLog "Installation completed. Enabling drivers in Kernel..."
         plymouth message --text="Installation completed. Enabling drivers in Kernel..." 2>/dev/null
@@ -52,7 +56,7 @@ run_nvidia_installation() {
         # Attempt to hot-unload Nouveau if active
         if lsmod | grep -q "nouveau"; then
             doLog "Removing legacy Nouveau driver..."
-            plymouth message --text="Removing legacy Nouveau driver..." 2>/dev/null
+            plymouth message --text="Removing legacy Nouveau driver..." 2>/dev/null 
             echo 0 > /sys/class/vtconsole/vtcon1/bind 2>/dev/null || true
             modprobe -r nouveau 2>/dev/null || doLog "Warning: Nouveau in use. Changes apply after reboot."
         fi
@@ -68,17 +72,8 @@ run_nvidia_installation() {
         doLog "Updating initramfs..."
         plymouth message --text="Updating initramfs..." 2>/dev/null
         update-initramfs -u -k all >/dev/null 2>&1
-        
-        # Verify hardware response
-        if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
-            doLog "SUCCESS: NVIDIA drivers installed and active."
-            plymouth message --text="NVIDIA enabled successfully" 2>/dev/null
-        else
-            doLog "WARNING: Driver installed. Reboot required to take control of display server."
-            plymouth message --text="NVIDIA: Reboot required" 2>/dev/null
-        fi
+
     else
-        main_status=${pipe_status[0]}
         plymouth message --text="ERROR: Automatic installation via ubuntu-drivers failed (Exit code: $main_status)" 2>/dev/null
         doLog "ERROR: Automatic installation via ubuntu-drivers failed (Exit code: $main_status)"
     fi
@@ -112,13 +107,14 @@ if lspci | grep -qi nvidia; then
 
     doLog "Hardware detected: Nvidia card present."
 
+    
     # 4. CHECK IF THE DRIVERS ARE ALREADY INSTALLED
     if ! command -v nvidia-smi &> /dev/null; then
 
         doLog "Driver status: NOT installed."
-
-        # 5. PREVIOUS ATTEMPT CHECK
+        
         PREVIOUS_FAILED=0
+        # 5. PREVIOUS ATTEMPT CHECK
         if [ -f "$ATTEMPT_FILE" ]; then
             doLog "WARNING: Previous attempt was interrupted. Flag detected."
             PREVIOUS_FAILED=1
@@ -220,7 +216,10 @@ if lspci | grep -qi nvidia; then
                 touch "$SUCCESS_FILE"
 
                 # We remove the flag that indicates that the installation is in progress; it should only remain if the installation fails.
-                rm -f "$ATTEMPT_FILE"
+                if [ -f "$ATTEMPT_FILE" ]; then
+                   rm -f "$ATTEMPT_FILE"
+                fi
+
                 sleep 3
 
                 reboot
@@ -237,7 +236,9 @@ if lspci | grep -qi nvidia; then
             sleep 2
 
             # If we are coming from a previous failure, we do not delete the flag
-            if [ $PREVIOUS_FAILED -eq 1 ] ; then exit 1; fi
+            if [ $PREVIOUS_FAILED -eq 1 ]; then 
+                exit 1
+            fi
         fi
     else
         # If there are Nvidia graphics installed, it is considered checked by creating the SUCCESS_FILE
@@ -253,6 +254,8 @@ else
 fi
 
 # It's removed just in case; it only arrives here if everything has gone well.
-rm -f "$ATTEMPT_FILE"
+if [ -f "$ATTEMPT_FILE" ]; then
+    rm -f "$ATTEMPT_FILE"
+fi
 
 doLog "=== Check completed successfully ==="
