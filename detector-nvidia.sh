@@ -105,34 +105,70 @@ run_nvidia_installation() {
 
 # 1. VALIDATE ROOT PRIVILEGES
 if [ "$EUID" -ne 0 ]; then
-    echo "This script must be run as root (sudo)." >&2
+    doLog "The nvidia-detector script must be run as root (sudo)." >&2
+    plymouth message --text="The nvidia-detector script must be run as root (sudo)." 2>/dev/null
+    sleep 2
     exit 1
 fi
 
 doLog "=== Starting startup check ==="
+plymouth message --text="=== Starting startup check ===" 2>/dev/null
+sleep 2
 
 # 2. AVOID EXECUTION IF IT HAS ALREADY SUCCESSFUL IN THE PAST
 # You will need to manually remove /var/local/nvidia_success.flag to bypass this check
+# Or answer affirmatively to the question asked
 if [ -f "$SUCCESS_FILE" ]; then
+
     doLog "Driver status: Already successfully installed by this script previously."
-    exit 0
+    plymouth message --text="Driver status: Already successfully installed by this script previously." 2>/dev/null
+    sleep 1
+
+    # 1. Display the question on the screen. Systemd will wait a maximum of 15 seconds.
+    # If the user does not write anything, the variable will remain empty.
+    plymouth message --text="Do you want to force graphics card detection again ? (y/n): " 2>/dev/null
+    theAnswer=$(plymouth watch-keystroke --keys="yYnN" --timeout=15 2>/dev/null)
+    
+    # Convert to lowercase to avoid problems if they write "YES" or "Yes"
+    theAnswer=$(echo "$theAnswer" | tr '[:upper:]' '[:lower:]')
+
+    # 2. Evaluate what the user did
+    if [ "$theAnswer" == "y" ]; then
+        doLog "[INFO] Starting forced graph detection..."
+        plymouth message --text="[INFO] Starting forced graph detection..." 2>/dev/null
+        sleep 1
+    else
+        # If you type "no", anything else, or the 15 seconds are up :
+        doLog "[INFO] Timeout expired or negative response. Continuing with normal startup..."
+        plymouth message --text="[INFO] Timeout expired or negative response. Continuing with normal startup..." 2>/dev/null
+        sleep 1
+        exit 0
+    fi
 fi
+
 
 # 3. VALIDATE NVIDIA HARDWARE
 if lspci | grep -qi nvidia; then
 
     doLog "Hardware detected: Nvidia card present."
+    plymouth message --text="Hardware detected: Nvidia card present." 2>/dev/null
+    sleep 1
 
     
     # 4. CHECK IF THE DRIVERS ARE ALREADY INSTALLED
     if ! command -v nvidia-smi &> /dev/null; then
 
         doLog "Driver status: NOT installed."
+        plymouth message --text="Driver status: NOT installed." 2>/dev/null
+        sleep 1
+
         
         PREVIOUS_FAILED=0
         # 5. PREVIOUS ATTEMPT CHECK
         if [ -f "$ATTEMPT_FILE" ]; then
             doLog "WARNING: Previous attempt was interrupted. Flag detected."
+            plymouth message --text="WARNING: Previous attempt was interrupted. Flag detected." 2>/dev/null
+            sleep 1
             PREVIOUS_FAILED=1
         fi
 
@@ -154,6 +190,7 @@ if lspci | grep -qi nvidia; then
             doLog "Internet connection: OK."
 
             plymouth message --text="Connecting to Ubuntu repositories..." 2>/dev/null
+            sleep 1
 
             # 8. LOCKOUT CONTROL WITH TIMEOUT (Maximum 2 minutes)
             block_attempts=0
@@ -164,6 +201,7 @@ if lspci | grep -qi nvidia; then
                 if [ $block_attempts -ge $max_block_attempts ]; then
                     doLog "ERROR: The package manager is still blocked after 2 minutes. Aborting installation."
                     plymouth message --text="Package system busy. Skipping installation." 2>/dev/null
+                    sleep 1
                     exit 1
                 fi
 
@@ -178,6 +216,7 @@ if lspci | grep -qi nvidia; then
             if [ $PREVIOUS_FAILED -eq 1 ]; then
                 plymouth message --text="Repairing package system..." 2>/dev/null
                 doLog "Starting package system repair..."
+                sleep 1
 
                 dpkg --configure -a >> "$LOG_FILE" 2>&1
                 apt-get install -f -y >> "$LOG_FILE" 2>&1
@@ -188,9 +227,11 @@ if lspci | grep -qi nvidia; then
                     PREVIOUS_FAILED=0
                     doLog "Repair completed successfully. Package system is healthy."
                     plymouth message --text="Repair completed successfully. Package system is healthy." 2>/dev/null
+                    sleep 1
                 else
                     doLog "CRITICAL ERROR: Package system is still broken after repair attempts. Aborting installation."
                     plymouth message --text="System repair failed. Skipping installation for safety." 2>/dev/null
+                    sleep 1
                     exit 1
                 fi
             fi
@@ -268,12 +309,69 @@ if lspci | grep -qi nvidia; then
         mkdir -p "$(dirname "$SUCCESS_FILE")"
         touch "$SUCCESS_FILE"
         doLog "Driver status: Already installed and working."
+        plymouth message --text="Driver status: Already installed and working." 2>/dev/null
+        sleep 1
     fi
 else
     # If there is no Nvidia graphics card, it is considered checked by creating the SUCCESS_FILE
+    # Check that the drivers are not installed; if they are, uninstall them.
+    doLog "Hardware detected: No Nvidia card."
+    plymouth message --text="Hardware detected: No Nvidia card." 2>/dev/null
+    sleep 1
+
+    # Let's assume that there are no drivers installed or that they are successfully removed
     mkdir -p "$(dirname "$SUCCESS_FILE")"
     touch "$SUCCESS_FILE"
-    doLog "Hardware detected: No Nvidia card."
+
+    if command -v nvidia-smi &> /dev/null; then
+
+        # The Nvidia drivers are installed
+        doLog "Nvidia drivers installed. We will now uninstall them."
+        plymouth message --text="Removing unused NVIDIA drivers..." 2>/dev/null
+        sleep 1
+
+        # Force non-interactive mode to avoid APT prompt crashes
+        export DEBIAN_FRONTEND=noninteractive
+
+        # Complete uninstallation and purging of packages and dependencies
+        apt-get purge -y -qq nvidia* libnvidia* 2>>"$LOG_FILE"
+        apt-get autoremove -y -qq 2>>"$LOG_FILE"
+
+        # Cleaning up Nvidia X11 video settings
+        rm -f /etc/X11/xorg.conf
+        rm -f /etc/X11/xorg.conf.d/*nvidia*
+
+        # Restore the open-source driver (Nouveau) if it was locked
+        if [ -f "/etc/modprobe.d/blacklist-nouveau.conf" ]; then
+            doLog "Restoring open-source Nouveau driver configuration..."
+            plymouth message --text="Restoring open-source Nouveau driver configuration..." 2>/dev/null
+            rm -f /etc/modprobe.d/blacklist-nouveau.conf
+            update-initramfs -u -k all >/dev/null 2>&1
+            sleep 1
+        fi
+
+        # Checking if the uninstallation was successful or not
+        if ! command -v nvidia-smi &> /dev/null && ! dpkg -l | grep -qE "^ii.*nvidia-(driver|kernel)"; then
+            doLog "SUCCESS: Unused NVIDIA drivers have been completely removed."
+            plymouth message --text="Unused NVIDIA drivers removed." 2>/dev/null
+        else
+            doLog "WARNING: APT commands finished but some NVIDIA packages or configurations still remain."
+            plymouth message --text="WARNING: Partial NVIDIA driver removal." 2>/dev/null
+
+            # Activating recovery mode for the next reboot
+            mkdir -p "$(dirname "$ATTEMPT_FILE")"
+            touch "$ATTEMPT_FILE"
+
+            # We will delete the file that indicates it was successful because that is not the case
+            if [ -f "$SUCCESS_FILE" ]; then
+                rm -f "$SUCCESS_FILE"
+            fi
+        fi
+    else
+        doLog "System is clean. No Nvidia drivers detected."
+        plymouth message --text="System is clean. No Nvidia drivers detected." 2>/dev/null
+    fi
+    sleep 1
 fi
 
 # It's removed just in case; it only arrives here if everything has gone well.
@@ -282,3 +380,5 @@ if [ -f "$ATTEMPT_FILE" ]; then
 fi
 
 doLog "=== Check completed successfully ==="
+plymouth message --text="=== Check completed successfully ===" 2>/dev/null
+sleep 2
