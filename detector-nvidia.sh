@@ -32,14 +32,24 @@ run_nvidia_installation() {
     apt-get install -y -qq linux-headers-$(uname -r) build-essential dkms 2>/dev/null
 
     # 3. Unattended driver installation
+    # Activate the 'lastpipe' option so that the loop runs on the main thread and PIPESTATUS works
+    shopt -s lastpipe
+
     ubuntu-drivers install 2>&1 | while read -r aLine; do
+        # Save to the log cleanly
         echo "$aLine" >> "$LOG_FILE"
-        aMessage=$(echo "$aLine" | grep -E "Unpacking|Preparing|Selecting|Setting|Created|Processing|Updating")
-        if [ "$aMessage" != ""  ]; then
-           plymouth message --text="$aMessage"
-           sleep 0.5
+    
+        # Extract only keywords and clean excess text
+        aMessage=$(echo "$aLine" | grep -oE "(Unpacking|Preparing|Selecting|Setting|Created|Processing|Updating|Get:).*" | head -n 1)
+    
+        if [ -n "$aMessage" ]; then
+            # Show formatted message on loading screen
+            plymouth message --text="$aMessage"
+            sleep 0.5
         fi
     done
+
+    # PIPESTATUS[0] will now correctly return the ubuntu-drivers exit code
     main_status=${PIPESTATUS[0]}
 
     # 4. Immediate kernel module loading
