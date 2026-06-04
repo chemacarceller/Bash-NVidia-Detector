@@ -127,7 +127,7 @@ if [ -f "$SUCCESS_FILE" ]; then
     # 1. Display the question on the screen. Systemd will wait a maximum of 15 seconds.
     # If the user does not write anything, the variable will remain empty.
     plymouth message --text="Do you want to force graphics card detection again ? (y/n): " 2>/dev/null
-    theAnswer=$(plymouth watch-keystroke --keys="yYnN" --timeout=15 2>/dev/null)
+    theAnswer=$(timeout --signal=INT 5 plymouth watch-keystroke --keys="yYnN" 2>/dev/null)
     
     # Convert to lowercase to avoid problems if they write "YES" or "Yes"
     theAnswer=$(echo "$theAnswer" | tr '[:upper:]' '[:lower:]')
