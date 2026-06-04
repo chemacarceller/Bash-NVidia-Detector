@@ -3,7 +3,9 @@
 # Files to store logs and to indicate that the operating system is ready and should not perform the process, or that the operating system has problems and needs to be fixed.
 LOG_FILE="/var/log/nvidia_autoinstall.log"
 ATTEMPT_FILE="/var/local/nvidia_attempted.flag"
-SUCCESS_FILE="/var/local/nvidia_success.flag"
+SUCESS_FILE="/var/local/nvidia_success.flag"
+
+removeSucessFlag='n'
 
 # Function to save logs
 doLog() {
@@ -118,7 +120,7 @@ sleep 2
 # 2. AVOID EXECUTION IF IT HAS ALREADY SUCCESSFUL IN THE PAST
 # You will need to manually remove /var/local/nvidia_success.flag to bypass this check
 # Or answer affirmatively to the question asked
-if [ -f "$SUCCESS_FILE" ]; then
+if [ -f "$SUCESS_FILE" ]; then
 
     doLog "Driver status: Already successfully installed by this script previously."
     plymouth message --text="Driver status: Already successfully installed by this script previously." 2>/dev/null
@@ -128,9 +130,17 @@ if [ -f "$SUCCESS_FILE" ]; then
     # If the user does not write anything, the variable will remain empty.
     plymouth message --text="Do you want to force graphics card detection again ? (y/n): " 2>/dev/null
     theAnswer=$(timeout --signal=INT 5 plymouth watch-keystroke --keys="yYnN" 2>/dev/null)
+
+    plymouth message --text="Do you want to remove the sucess flag ? (y/n): " 2>/dev/null
+    removeSucessFlag=$(timeout --signal=INT 5 plymouth watch-keystroke --keys="yYnN" 2>/dev/null)
     
     # Convert to lowercase to avoid problems if they write "YES" or "Yes"
     theAnswer=$(echo "$theAnswer" | tr '[:upper:]' '[:lower:]')
+    removeSucessFlag=$(echo "$removeSucessFlag" | tr '[:upper:]' '[:lower:]')
+
+    if [[ -f "$SUCESS_FILE" && "$removeSucessFlag" == "y" ]]; then
+        rm -f "$SUCESS_FILE"
+    fi 
 
     # 2. Evaluate what the user did
     if [ "$theAnswer" == "y" ]; then
@@ -275,9 +285,9 @@ if lspci | grep -qi nvidia; then
                 plymouth message --text="Installation completed successfully. Restarting..." 2>/dev/null
                 doLog "Restarting the computer to apply changes..."    
 
-                # If there are Nvidia graphics installed, it is considered checked by creating the SUCCESS_FILE       
-                mkdir -p "$(dirname "$SUCCESS_FILE")"
-                touch "$SUCCESS_FILE"
+                # If there are Nvidia graphics installed, it is considered checked by creating the SUCESS_FILE       
+                mkdir -p "$(dirname "$SUCESS_FILE")"
+                touch "$SUCESS_FILE"
 
                 # We remove the flag that indicates that the installation is in progress; it should only remain if the installation fails.
                 if [ -f "$ATTEMPT_FILE" ]; then
@@ -285,6 +295,10 @@ if lspci | grep -qi nvidia; then
                 fi
 
                 sleep 2
+
+                plymouth message --text="Do you want to remove the sucess flag ? (y/n): " 2>/dev/null
+                removeSucessFlag=$(timeout --signal=INT 5 plymouth watch-keystroke --keys="yYnN" 2>/dev/null)
+                removeSucessFlag=$(echo "$removeSucessFlag" | tr '[:upper:]' '[:lower:]')
 
                 reboot
             else
@@ -305,23 +319,32 @@ if lspci | grep -qi nvidia; then
             fi
         fi
     else
-        # If there are Nvidia graphics installed, it is considered checked by creating the SUCCESS_FILE
-        mkdir -p "$(dirname "$SUCCESS_FILE")"
-        touch "$SUCCESS_FILE"
+        # If there are Nvidia graphics installed, it is considered checked by creating the SUCESS_FILE
+        mkdir -p "$(dirname "$SUCESS_FILE")"
+        touch "$SUCESS_FILE"
+
         doLog "Driver status: Already installed and working."
         plymouth message --text="Driver status: Already installed and working." 2>/dev/null
-        sleep 1
+        sleep 2
+
+        plymouth message --text="Do you want to remove the sucess flag ? (y/n): " 2>/dev/null
+        removeSucessFlag=$(timeout --signal=INT 5 plymouth watch-keystroke --keys="yYnN" 2>/dev/null)
+        removeSucessFlag=$(echo "$removeSucessFlag" | tr '[:upper:]' '[:lower:]')
     fi
 else
-    # If there is no Nvidia graphics card, it is considered checked by creating the SUCCESS_FILE
+    # If there is no Nvidia graphics card, it is considered checked by creating the SUCESS_FILE
     # Check that the drivers are not installed; if they are, uninstall them.
     doLog "Hardware detected: No Nvidia card."
     plymouth message --text="Hardware detected: No Nvidia card." 2>/dev/null
-    sleep 1
+    sleep 2
 
     # Let's assume that there are no drivers installed or that they are successfully removed
-    mkdir -p "$(dirname "$SUCCESS_FILE")"
-    touch "$SUCCESS_FILE"
+    mkdir -p "$(dirname "$SUCESS_FILE")"
+    touch "$SUCESS_FILE"
+
+    plymouth message --text="Do you want to remove the sucess flag ? (y/n): " 2>/dev/null
+    removeSucessFlag=$(timeout --signal=INT 5 plymouth watch-keystroke --keys="yYnN" 2>/dev/null)
+    removeSucessFlag=$(echo "$removeSucessFlag" | tr '[:upper:]' '[:lower:]')
 
     if command -v nvidia-smi &> /dev/null; then
 
@@ -334,8 +357,13 @@ else
         export DEBIAN_FRONTEND=noninteractive
 
         # Complete uninstallation and purging of packages and dependencies
-        apt-get purge -y -qq nvidia* libnvidia* 2>>"$LOG_FILE"
-        apt-get autoremove -y -qq 2>>"$LOG_FILE"
+        apt-get clean -y -qq 2>>"$LOG_FILE"
+        apt-get update --fix-missing -y -qq 2>>"$LOG_FILE"
+	dpkg --configure -a 2>>"$LOG_FILE"
+	apt-get install -f -y -qq 2>>"$LOG_FILE"
+        apt-get remove -y -qq nvidia* libnvidia* 2>>"$LOG_FILE"
+        apt-get autoremove --purge -y -qq 2>>"$LOG_FILE"
+        apt-get install xserver-xorg-video-nouveau -y -qq 2>>"$LOG_FILE"
 
         # Cleaning up Nvidia X11 video settings
         rm -f /etc/X11/xorg.conf
@@ -363,8 +391,8 @@ else
             touch "$ATTEMPT_FILE"
 
             # We will delete the file that indicates it was successful because that is not the case
-            if [ -f "$SUCCESS_FILE" ]; then
-                rm -f "$SUCCESS_FILE"
+            if [ -f "$SUCESS_FILE" ]; then
+                rm -f "$SUCESS_FILE"
             fi
         fi
     else
@@ -378,6 +406,10 @@ fi
 if [ -f "$ATTEMPT_FILE" ]; then
     rm -f "$ATTEMPT_FILE"
 fi
+
+if [[ -f "$SUCESS_FILE" && "$removeSucessFlag" == "y" ]]; then
+    rm -f "$SUCESS_FILE"
+fi 
 
 doLog "=== Check completed successfully ==="
 plymouth message --text="=== Check completed successfully ===" 2>/dev/null
